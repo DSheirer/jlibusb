@@ -9,6 +9,7 @@ export LC_ALL=C
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HEADER="$1"
+[ -f "$HEADER" ] || { echo "No such header: $HEADER" >&2; exit 1; }
 BINDINGS="$ROOT/src/main/java/io/github/dsheirer/libusb/internal/Native.java"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
