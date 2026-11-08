@@ -80,12 +80,14 @@ class LibraryTest {
     void reportsCapabilities() {
         // libusb implements hotplug on Linux and macOS; Windows support
         // depends on the release, so it is only reported.
-        if (NativeLoader.platform().startsWith("windows")) {
+        boolean windows = NativeLoader.platform().startsWith("windows");
+        if (windows) {
             System.out.println("Windows hotplug capability: " + LibUsb.hasHotplug());
         } else {
             assertTrue(LibUsb.hasHotplug(), "hotplug capability");
         }
-        assertEquals(NativeLoader.platform().startsWith("linux"), LibUsb.supportsDetachKernelDriver());
+        // The Linux and macOS (darwin) backends both declare kernel driver detach.
+        assertEquals(!windows, LibUsb.supportsDetachKernelDriver(), "detach kernel driver capability");
     }
 
     @Test

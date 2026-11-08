@@ -35,7 +35,11 @@ public final class LibUsb {
         return hasCapability(Layouts.CAP_HAS_HID_ACCESS);
     }
 
-    /** True when libusb can detach a kernel driver from an interface; Linux only. */
+    /**
+     * True when libusb can detach a kernel driver from an interface: Linux and
+     * macOS. On macOS a detach also needs root or the
+     * {@code com.apple.vm.device-access} entitlement.
+     */
     public static boolean supportsDetachKernelDriver() {
         return hasCapability(Layouts.CAP_SUPPORTS_DETACH_KERNEL_DRIVER);
     }
