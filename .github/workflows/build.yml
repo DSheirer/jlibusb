@@ -1,0 +1,139 @@
+# Builds libusb on all six platforms, tests the bindings against each one,
+# assembles the complete jar, and checks that jar on each platform.
+# Called by the ci, nightly and release workflows.
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version of the jar
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '23'
+
+jobs:
+  native:
+    name: Native ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64, runner: ubuntu-24.04 }
+          - { platform: linux-aarch64, runner: ubuntu-24.04-arm }
+          - { platform: macos-x86_64, runner: macos-15-intel }
+          - { platform: macos-aarch64, runner: macos-15 }
+          - { platform: windows-x86_64, runner: windows-2022, msvc_arch: x64 }
+          - { platform: windows-aarch64, runner: windows-11-arm, msvc_arch: ARM64 }
+    steps:
+      - uses: actions/checkout@v7
+
+      # AlmaLinux 9 sets the glibc baseline (2.34) of the Linux binaries.
+      - name: Build libusb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD:/work" -w /work \
+            -e HOST_ID="$(id -u):$(id -g)" -e JLIBUSB_WORK_DIR=/tmp/native-work \
+            -e JLIBUSB_CACHE_DIR=/tmp/native-cache \
+            almalinux:9 bash -c '
+              set -e
+              dnf -y -q install gcc make bzip2 tar binutils
+              trap "chown -R $HOST_ID dist" EXIT
+              ./native/build-unix.sh'
+
+      - name: Build libusb (macOS)
+        if: runner.os == 'macOS'
+        run: ./native/build-unix.sh
+
+      - name: Package libusb (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./native/build-windows.ps1 -Arch ${{ matrix.msvc_arch }}
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Test bindings on this platform
+        shell: bash
+        run: ./gradlew test --console=plain
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.platform }}
+          path: dist/native
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Assemble jar
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: dist/native
+          merge-multiple: true
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # requireAllPlatforms makes an incomplete jar a build failure.
+      - name: Assemble
+        env:
+          VERSION: ${{ inputs.version }}
+        run: ./gradlew assemble --console=plain -PrequireAllPlatforms=true -Pversion="$VERSION"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jars
+          path: build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Verify jar ${{ matrix.platform }}
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x86_64, runner: ubuntu-22.04 }
+          - { platform: linux-aarch64, runner: ubuntu-22.04-arm }
+          - { platform: macos-x86_64, runner: macos-15-intel }
+          - { platform: macos-aarch64, runner: macos-15 }
+          - { platform: windows-x86_64, runner: windows-2022 }
+          - { platform: windows-aarch64, runner: windows-11-arm }
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: jars
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Load native libraries from the jar
+        shell: bash
+        run: |
+          jar="$(ls jlibusb-*.jar | grep -Ev -- '-(sources|javadoc)\.jar$')"
+          java -jar "$jar" | tee output.txt
+          grep -q '^libusb [0-9]' output.txt
