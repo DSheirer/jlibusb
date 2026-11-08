@@ -58,6 +58,8 @@ public final class Native {
     public static final MethodHandle GET_DEVICE_SPEED = call("libusb_get_device_speed", ADDRESS);
     public static final MethodHandle OPEN = call("libusb_open", ADDRESS, ADDRESS);
     public static final MethodHandle CLOSE = voidCall("libusb_close", ADDRESS);
+    public static final MethodHandle CLAIM_INTERFACE = call("libusb_claim_interface", ADDRESS, JAVA_INT);
+    public static final MethodHandle RELEASE_INTERFACE = call("libusb_release_interface", ADDRESS, JAVA_INT);
     public static final MethodHandle GET_STRING_DESCRIPTOR_ASCII =
         call("libusb_get_string_descriptor_ascii", ADDRESS, JAVA_BYTE, ADDRESS, JAVA_INT);
 

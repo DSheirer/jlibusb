@@ -124,6 +124,48 @@ class LibraryTest {
     }
 
     @Test
+    void openingAMissingDeviceFails() throws UsbException {
+        UsbDeviceInfo missing = new UsbDeviceInfo(250, 127, List.of(7, 7), 0xffff, 0xffff, 0, 0x0200, 0,
+            UsbSpeed.HIGH, 0, 0, 0);
+        try (UsbContext usb = UsbContext.create()) {
+            UsbException e = assertThrows(UsbException.class, () -> usb.open(missing));
+            assertEquals(-4, e.code(), e.getMessage());
+        }
+    }
+
+    @Test
+    void opensDevicesAndReadsStrings() throws UsbException {
+        // Uses whichever connected device this user may open, if any: CI machines may have none.
+        try (UsbContext usb = UsbContext.create()) {
+            for (UsbDeviceInfo device : usb.devices()) {
+                UsbDeviceHandle handle;
+                try {
+                    handle = usb.open(device);
+                } catch (UsbException e) {
+                    continue;
+                }
+                try (handle) {
+                    assertEquals(null, handle.readString(0));
+                    System.out.println("  opened " + device + ": serial [" + handle.readString(device.serialNumberIndex())
+                        + "]");
+                    try {
+                        handle.claimInterface(0);
+                        handle.releaseInterface(0);
+                        System.out.println("    claimed and released interface 0");
+                    } catch (UsbException e) {
+                        // Busy (a kernel driver has it) or not supported for this device: both are answers.
+                        System.out.println("    interface 0: " + e.getMessage());
+                    }
+                }
+                assertThrows(IllegalStateException.class, () -> handle.readString(1));
+                handle.close();
+                return;
+            }
+            System.out.println("  no device could be opened here");
+        }
+    }
+
+    @Test
     void hotplugStartsAndStops() throws UsbException {
         assertHotplugMatchesDeviceList(UsbHotplug.builder());
     }
