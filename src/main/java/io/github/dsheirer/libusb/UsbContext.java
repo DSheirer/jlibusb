@@ -9,7 +9,6 @@ import io.github.dsheirer.libusb.internal.Native;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.invoke.MethodHandle;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,8 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * own, so a context here never interferes with devices they have open.
  */
 public final class UsbContext implements AutoCloseable {
-    private static final int STRING_BUFFER = 256;
-
     private final MemorySegment context;
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -98,13 +95,13 @@ public final class UsbContext implements AutoCloseable {
     }
 
     /**
-     * Opens a device briefly to read its manufacturer, product and serial
-     * number strings. Fails with {@code LIBUSB_ERROR_ACCESS} when the user
-     * lacks permission, and on Windows when the device has no WinUSB driver.
+     * Opens a device. Fails with {@code LIBUSB_ERROR_ACCESS} (-3) when the
+     * user lacks permission, and on Windows when the device has no WinUSB
+     * driver. Close the handle before this context.
      *
-     * @throws UsbException with {@code LIBUSB_ERROR_NO_DEVICE} when the device is no longer connected
+     * @throws UsbException with {@code LIBUSB_ERROR_NO_DEVICE} (-4) when the device is no longer connected
      */
-    public UsbStrings readStrings(UsbDeviceInfo device) throws UsbException {
+    public UsbDeviceHandle open(UsbDeviceInfo device) throws UsbException {
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment pointer = arena.allocate(ADDRESS);
             MemorySegment ctx = handle();
@@ -118,16 +115,35 @@ public final class UsbContext implements AutoCloseable {
                     MemorySegment candidate = list.getAtIndex(ADDRESS, i);
                     UsbDeviceInfo info = describe(candidate, arena);
                     if (info != null && info.sameConnection(device)) {
-                        return readStrings(candidate, info, arena);
+                        MemorySegment handlePointer = arena.allocate(ADDRESS);
+                        int result = invoke(() -> (int) Native.OPEN.invokeExact(candidate, handlePointer));
+                        if (result < 0) {
+                            throw new UsbException("libusb_open", result);
+                        }
+                        // The handle holds its own reference to the device, so the list can be freed.
+                        return new UsbDeviceHandle(handlePointer.get(ADDRESS, 0));
                     }
                 }
-                throw new UsbException("libusb_get_device_list", -4);
+                throw new UsbException("libusb_open", Layouts.ERROR_NO_DEVICE);
             } finally {
                 invoke(() -> {
                     Native.FREE_DEVICE_LIST.invokeExact(list, 1);
                     return null;
                 });
             }
+        }
+    }
+
+    /**
+     * Opens a device briefly to read its manufacturer, product and serial
+     * number strings. Fails as {@link #open} does.
+     */
+    public UsbStrings readStrings(UsbDeviceInfo device) throws UsbException {
+        try (UsbDeviceHandle handle = open(device)) {
+            return new UsbStrings(
+                handle.readString(device.manufacturerIndex()),
+                handle.readString(device.productIndex()),
+                handle.readString(device.serialNumberIndex()));
         }
     }
 
@@ -179,39 +195,5 @@ public final class UsbContext implements AutoCloseable {
             Layouts.u8(descriptor, Layouts.DEVICE_DESCRIPTOR, "iManufacturer"),
             Layouts.u8(descriptor, Layouts.DEVICE_DESCRIPTOR, "iProduct"),
             Layouts.u8(descriptor, Layouts.DEVICE_DESCRIPTOR, "iSerialNumber"));
-    }
-
-    private static UsbStrings readStrings(MemorySegment device, UsbDeviceInfo info, Arena arena) throws UsbException {
-        MemorySegment pointer = arena.allocate(ADDRESS);
-        int result = invoke(() -> (int) Native.OPEN.invokeExact(device, pointer));
-        if (result < 0) {
-            throw new UsbException("libusb_open", result);
-        }
-        MemorySegment handle = pointer.get(ADDRESS, 0);
-        try {
-            MemorySegment buffer = arena.allocate(STRING_BUFFER);
-            return new UsbStrings(
-                readString(handle, info.manufacturerIndex(), buffer),
-                readString(handle, info.productIndex(), buffer),
-                readString(handle, info.serialNumberIndex(), buffer));
-        } finally {
-            invoke(() -> {
-                Native.CLOSE.invokeExact(handle);
-                return null;
-            });
-        }
-    }
-
-    private static String readString(MemorySegment handle, int index, MemorySegment buffer) {
-        if (index == 0) {
-            return null;
-        }
-        int length = invoke(() -> (int) Native.GET_STRING_DESCRIPTOR_ASCII.invokeExact(handle, (byte) index, buffer,
-            (int) buffer.byteSize()));
-        if (length < 0) {
-            return null;
-        }
-        byte[] bytes = buffer.asSlice(0, length).toArray(JAVA_BYTE);
-        return new String(bytes, StandardCharsets.US_ASCII).trim();
     }
 }

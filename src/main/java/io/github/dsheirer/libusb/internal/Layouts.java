@@ -25,6 +25,9 @@ import java.util.Locale;
 public final class Layouts {
     // ---- Error codes, enum libusb_error ----
     public static final int SUCCESS = 0;
+    public static final int ERROR_ACCESS = -3;
+    public static final int ERROR_NO_DEVICE = -4;
+    public static final int ERROR_BUSY = -6;
     public static final int ERROR_NOT_SUPPORTED = -12;
 
     // ---- Capabilities, enum libusb_capability ----
