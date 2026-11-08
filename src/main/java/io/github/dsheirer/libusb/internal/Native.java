@@ -60,6 +60,12 @@ public final class Native {
     public static final MethodHandle CLOSE = voidCall("libusb_close", ADDRESS);
     public static final MethodHandle CLAIM_INTERFACE = call("libusb_claim_interface", ADDRESS, JAVA_INT);
     public static final MethodHandle RELEASE_INTERFACE = call("libusb_release_interface", ADDRESS, JAVA_INT);
+    public static final MethodHandle KERNEL_DRIVER_ACTIVE = call("libusb_kernel_driver_active", ADDRESS, JAVA_INT);
+    public static final MethodHandle DETACH_KERNEL_DRIVER = call("libusb_detach_kernel_driver", ADDRESS, JAVA_INT);
+    public static final MethodHandle ATTACH_KERNEL_DRIVER = call("libusb_attach_kernel_driver", ADDRESS, JAVA_INT);
+    /** {@code libusb_interrupt_transfer(handle, unsigned char endpoint, unsigned char *data, int length, int *transferred, unsigned int timeout)}. */
+    public static final MethodHandle INTERRUPT_TRANSFER = call("libusb_interrupt_transfer",
+        ADDRESS, JAVA_BYTE, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT);
     public static final MethodHandle GET_STRING_DESCRIPTOR_ASCII =
         call("libusb_get_string_descriptor_ascii", ADDRESS, JAVA_BYTE, ADDRESS, JAVA_INT);
 

@@ -148,6 +148,9 @@ class LibraryTest {
                     assertEquals(null, handle.readString(0));
                     System.out.println("  opened " + device + ": serial [" + handle.readString(device.serialNumberIndex())
                         + "]");
+                    System.out.println("    kernel driver on interface 0: " + handle.isKernelDriverActive(0));
+                    assertThrows(IllegalArgumentException.class, () -> handle.interruptTransfer(0x81, new byte[4], 8, 10));
+                    assertThrows(IllegalArgumentException.class, () -> handle.interruptTransfer(0x81, new byte[4], 4, -1));
                     try {
                         handle.claimInterface(0);
                         handle.releaseInterface(0);

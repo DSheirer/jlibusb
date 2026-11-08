@@ -2,7 +2,9 @@ package io.github.dsheirer.libusb;
 
 import static io.github.dsheirer.libusb.internal.Native.invoke;
 import static java.lang.foreign.ValueLayout.JAVA_BYTE;
+import static java.lang.foreign.ValueLayout.JAVA_INT;
 
+import io.github.dsheirer.libusb.internal.Layouts;
 import io.github.dsheirer.libusb.internal.Native;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -11,12 +13,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * An open USB device, from {@link UsbContext#open}. Close it before closing
- * the context that opened it.
+ * the context that opened it. Thread safe.
  *
- * <p>Opening a device gives access to its string descriptors and lets an
- * application check whether another program is using it, by claiming an
- * interface. Close it again before handing the device to a driver library
- * such as LimeSuiteNG, which opens the device itself.
+ * <p>Opening a device gives access to its string descriptors, lets an
+ * application check whether another program is using it by claiming an
+ * interface, and lets it talk to the device with interrupt transfers. When a
+ * driver library such as LimeSuiteNG talks to the device instead, close the
+ * handle before the library opens it.
  *
  * <pre>{@code
  * try (UsbDeviceHandle handle = usb.open(device)) {
@@ -81,6 +84,89 @@ public final class UsbDeviceHandle implements AutoCloseable {
         int result = invoke(() -> (int) Native.RELEASE_INTERFACE.invokeExact(h, interfaceNumber));
         if (result < 0) {
             throw new UsbException("libusb_release_interface", result);
+        }
+    }
+
+    /**
+     * Whether a kernel driver, such as Linux's usbhid, is bound to an
+     * interface. Claiming the interface fails until it is detached.
+     *
+     * @return false also where the platform cannot report it: Windows, whose
+     *     drivers are chosen per device rather than attached by the kernel
+     */
+    public boolean isKernelDriverActive(int interfaceNumber) throws UsbException {
+        MemorySegment h = handle();
+        int result = invoke(() -> (int) Native.KERNEL_DRIVER_ACTIVE.invokeExact(h, interfaceNumber));
+        if (result == Layouts.ERROR_NOT_SUPPORTED) {
+            return false;
+        }
+        if (result < 0) {
+            throw new UsbException("libusb_kernel_driver_active", result);
+        }
+        return result == 1;
+    }
+
+    /**
+     * Detaches the kernel driver from an interface. Linux and macOS; macOS
+     * needs root or the {@code com.apple.vm.device-access} entitlement.
+     */
+    public void detachKernelDriver(int interfaceNumber) throws UsbException {
+        MemorySegment h = handle();
+        int result = invoke(() -> (int) Native.DETACH_KERNEL_DRIVER.invokeExact(h, interfaceNumber));
+        if (result < 0) {
+            throw new UsbException("libusb_detach_kernel_driver", result);
+        }
+    }
+
+    /** Re-attaches a kernel driver detached with {@link #detachKernelDriver}. */
+    public void attachKernelDriver(int interfaceNumber) throws UsbException {
+        MemorySegment h = handle();
+        int result = invoke(() -> (int) Native.ATTACH_KERNEL_DRIVER.invokeExact(h, interfaceNumber));
+        if (result < 0) {
+            throw new UsbException("libusb_attach_kernel_driver", result);
+        }
+    }
+
+    /**
+     * Performs a synchronous interrupt transfer on an endpoint of a claimed
+     * interface. For an IN endpoint (bit 7 set, such as {@code 0x81}) the
+     * received bytes are written to {@code data}; for an OUT endpoint the
+     * first {@code length} bytes of {@code data} are sent.
+     *
+     * @param endpoint endpoint address, including the direction bit
+     * @param data buffer to send from or receive into
+     * @param length bytes to send, or the most bytes to receive
+     * @param timeoutMillis how long to wait; 0 waits indefinitely
+     * @return bytes transferred
+     * @throws UsbException with {@code LIBUSB_ERROR_TIMEOUT} (-7) when the
+     *     timeout passes, and {@code LIBUSB_ERROR_NO_DEVICE} (-4) when the
+     *     device has been disconnected
+     */
+    public int interruptTransfer(int endpoint, byte[] data, int length, int timeoutMillis) throws UsbException {
+        if (length < 0 || length > data.length) {
+            throw new IllegalArgumentException("Length " + length + " outside buffer of " + data.length + " bytes");
+        }
+        if (timeoutMillis < 0) {
+            throw new IllegalArgumentException("Negative timeout: " + timeoutMillis);
+        }
+        MemorySegment h = handle();
+        boolean in = (endpoint & 0x80) != 0;
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment buffer = arena.allocate(Math.max(length, 1));
+            if (!in && length > 0) {
+                MemorySegment.copy(data, 0, buffer, JAVA_BYTE, 0, length);
+            }
+            MemorySegment transferred = arena.allocate(JAVA_INT);
+            int result = invoke(() -> (int) Native.INTERRUPT_TRANSFER.invokeExact(h, (byte) endpoint, buffer,
+                length, transferred, timeoutMillis));
+            if (result < 0) {
+                throw new UsbException("libusb_interrupt_transfer", result);
+            }
+            int count = transferred.get(JAVA_INT, 0);
+            if (in && count > 0) {
+                MemorySegment.copy(buffer, JAVA_BYTE, 0, data, 0, count);
+            }
+            return count;
         }
     }
 

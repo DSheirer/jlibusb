@@ -63,6 +63,11 @@ try (UsbContext usb = UsbContext.create()) {
 }
 ```
 
+A handle also detaches kernel drivers (`isKernelDriverActive`,
+`detachKernelDriver`, `attachKernelDriver`) and performs synchronous interrupt
+transfers (`interruptTransfer`), enough to drive a HID-class device such as
+the FUNcube Dongle directly.
+
 `UsbDeviceInfo.portPath()` names the physical socket, such as `1-2.3`, and
 stays the same when a device is plugged into the same socket again.
 
